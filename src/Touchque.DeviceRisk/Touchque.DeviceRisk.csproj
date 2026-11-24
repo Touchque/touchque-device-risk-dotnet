@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <PackageId>Touchque.DeviceRisk</PackageId>
+    <AssemblyName>Touchque.DeviceRisk</AssemblyName>
+    <RootNamespace>Touchque.DeviceRisk</RootNamespace>
+    <Description>Official .NET server SDK for Touchque Device Risk: check a page's device identification for an account, read and search identifications, report what a visitor did (payments, failed sign-ins, probing, SMS codes, wrong codes) and verify Device risk webhooks.</Description>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../CHANGELOG.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Touchque.DeviceRisk.Tests" />
+  </ItemGroup>
+
+</Project>
