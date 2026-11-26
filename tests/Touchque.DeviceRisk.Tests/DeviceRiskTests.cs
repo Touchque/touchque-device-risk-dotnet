@@ -93,6 +93,48 @@ public class DeviceRiskTests : IAsyncLifetime
     }
 
     [Fact]
+    public void TheKindOfNetworkAndTheSharedCountsComeThrough()
+    {
+        var r = DeviceRiskClient.ParseCheck(JsonNode.Parse("""
+            {"report":"ok","network":{"countryCode":"TR","asn":64500,"asnOrg":"Example University","type":"isp","tor":false,"hosting":false,
+              "hostingProvider":null,"proxy":true,"timezoneMismatch":false,"kind":"education","kindSource":"network","vpn":false,
+              "shared":true,"sharedVisitors24h":100,"sharedAccounts24h":null,"lookAlikeMatching":false}}
+            """));
+        var n = r.Network ?? throw new InvalidOperationException("no network");
+        Assert.Equal(("education", "network", (bool?)false, (bool?)true), ((string?)n["kind"], (string?)n["kindSource"], (bool?)n["vpn"], (bool?)n["proxy"]));
+        Assert.Equal(((bool?)true, (int?)100, (bool?)false), ((bool?)n["shared"], (int?)n["sharedVisitors24h"], (bool?)n["lookAlikeMatching"]));
+        Assert.True(n.ContainsKey("sharedAccounts24h") && n["sharedAccounts24h"] is null);
+
+        // Apple's relay, a VPN company and a kind newer than this SDK: kept as they came (an open list).
+        var relay = DeviceRiskClient.ParseCheck(JsonNode.Parse("""{"network":{"type":"relay","kind":"relay","kindSource":"address","vpn":false}}""")).Network!;
+        Assert.Equal(("relay", "relay", "address"), ((string?)relay["type"], (string?)relay["kind"], (string?)relay["kindSource"]));
+        var vpn = DeviceRiskClient.ParseCheck(JsonNode.Parse("""{"network":{"type":"hosting","kind":"vpn","kindSource":"network","vpn":true}}""")).Network!;
+        Assert.Equal(("vpn", (bool?)true), ((string?)vpn["kind"], (bool?)vpn["vpn"]));
+        Assert.Equal("satellite", (string?)DeviceRiskClient.ParseCheck(JsonNode.Parse("""{"network":{"kind":"satellite"}}""")).Network!["kind"]);
+        Assert.Equal(["residential", "mobile_carrier", "education", "business", "public_wifi", "hosting", "proxy", "vpn", "tor", "relay", "unknown"], DeviceRiskClient.NetworkKinds);
+
+        // An older server sends none of them: absent, never made up from type.
+        var old = DeviceRiskClient.ParseCheck(JsonNode.Parse("""{"network":{"type":"hosting","tor":false,"hosting":true}}""")).Network!;
+        Assert.Equal(["type", "tor", "hosting"], old.Select(p => p.Key));
+    }
+
+    [Fact]
+    public void AiAgentsOnThePageAndTheNewBotReasonsComeThrough()
+    {
+        var r = DeviceRiskClient.ParseCheck(JsonNode.Parse("""
+            {"report":"ok","bot":{"result":"detected","type":"ai_agent",
+              "reasons":["tool_claude_agent","tool_comet_agent","tool_genspark_agent","tool_browser_use","tool_stagehand","tool_skyvern",
+                "headless_window","emulator","cdp_input","input_no_focus","insert_text_bulk","scripted_click"],
+              "tools":["claude_agent","comet_agent","genspark_agent","browser_use","stagehand","skyvern"],"agent":null,"input":[]}}
+            """));
+        var bot = r.Bot ?? throw new InvalidOperationException("no bot");
+        Assert.Equal(("detected", "ai_agent"), ((string?)bot["result"], (string?)bot["type"]));
+        Assert.Equal(["claude_agent", "comet_agent", "genspark_agent", "browser_use", "stagehand", "skyvern"], bot["tools"]!.AsArray().Select(t => (string)t!));
+        Assert.Equal(["tool_claude_agent", "tool_comet_agent", "tool_genspark_agent", "tool_browser_use", "tool_stagehand", "tool_skyvern",
+            "headless_window", "emulator", "cdp_input", "input_no_focus", "insert_text_bulk", "scripted_click"], bot["reasons"]!.AsArray().Select(t => (string)t!));
+    }
+
+    [Fact]
     public void TheSuspectScoreAndTheAccountDeviceComeThrough()
     {
         var r = DeviceRiskClient.ParseCheck(JsonNode.Parse("""
@@ -137,5 +179,43 @@ public class DeviceRiskTests : IAsyncLifetime
         } while (cursor != null);
         Assert.Equal(new[] { "dre_fakeEvent00000000003", "dre_fakeEvent00000000002", "dre_fakeEvent00000000001" }, seen);
         await Assert.ThrowsAsync<TouchqueConfigException>(() => dr.SearchEventsAsync(new DeviceRiskSearchOptions { Limit = 101 }));
+    }
+
+    [Fact]
+    public async Task SearchEventsSendsTheNetworkKindAndSharedFilters()
+    {
+        var dr = _api.Client();
+        await dr.SearchEventsAsync(new DeviceRiskSearchOptions { NetworkKind = "education", Shared = false, Limit = 5 });
+        JsonAssert.Equal(new { networkKind = "education", shared = "false", limit = "5" }, await _api.LastDeviceRiskSearchAsync());
+        await dr.SearchEventsAsync(new DeviceRiskSearchOptions { NetworkKind = "public_wifi", Shared = true });
+        JsonAssert.Equal(new { networkKind = "public_wifi", shared = "true" }, await _api.LastDeviceRiskSearchAsync());
+    }
+
+    [Fact]
+    public async Task TheVisitorMarkIsTheMarkApplied()
+    {
+        var dr = _api.Client();
+        var id = "dre_" + new string('a', 22);
+        var flagged = "dre_flagged" + new string('a', 15);
+        async Task<JsonObject> VisitorAsync(string requestId) => (await dr.CheckAsync(new DeviceRiskCheckOptions { RequestId = requestId })).Visitor!;
+
+        var v = await VisitorAsync(id);
+        Assert.True(v.ContainsKey("mark") && v["mark"] is null);
+        Assert.Equal("none", (string?)v["status"]);
+
+        await _api.OptsAsync(new { deviceMark = "trusted" });
+        v = await VisitorAsync(id);
+        Assert.Equal(("trusted", "trusted", "key"), ((string?)v["status"], (string?)v["mark"], (string?)v["matchedBy"]));
+        v = await VisitorAsync(flagged);
+        Assert.Equal(("trusted", (string?)null), ((string?)v["status"], (string?)v["mark"]));
+        Assert.Equal("trusted", (string?)(await dr.GetEventAsync(id))["visitor"]!["mark"]);
+
+        await _api.OptsAsync(new { deviceMark = "step_up" });
+        Assert.Equal("step_up", (string?)(await VisitorAsync(flagged))["mark"]);
+
+        // A mark other than trusted or step_up reads as null; the answer itself is not changed.
+        var odd = JsonNode.Parse("""{"report":"ok","visitor":{"status":"none","mark":"allow"}}""")!;
+        Assert.Null(DeviceRiskClient.ParseCheck(odd).Visitor!["mark"]);
+        Assert.Equal("allow", (string?)odd["visitor"]!["mark"]);
     }
 }

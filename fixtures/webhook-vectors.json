@@ -87,6 +87,40 @@
       "expected_canonical": "{\"action\":\"LOGIN_REJECT\",\"reason\":\"user_declined\",\"requestId\":\"req_6\",\"status\":\"REJECTED\",\"timestamp\":\"2026-09-01T12:00:00.000Z\"}",
       "expected_signature": "85118524d0ad4ebde83574d72b255510d14218dc5949a06ad11670b4c0884eb0",
       "delivered_body": "{\"status\":\"REJECTED\",\"action\":\"LOGIN_REJECT\",\"requestId\":\"req_6\",\"reason\":\"user_declined\",\"timestamp\":\"2026-09-01T12:00:00.000Z\",\"signature\":\"85118524d0ad4ebde83574d72b255510d14218dc5949a06ad11670b4c0884eb0\"}"
+    },
+    {
+      "description": "login result with riskLevel next to riskScore (a capped sum of flag weights)",
+      "payload": {
+        "status": "SUCCESS",
+        "action": "LOGIN_CONFIRM",
+        "requestId": "req_7",
+        "externalUsername": "a@b.com",
+        "timestamp": "2026-11-24T12:00:00.000Z",
+        "jti": "jti_7",
+        "riskScore": 0.3,
+        "riskLevel": "medium",
+        "riskFactors": [
+          "new_country_for_user"
+        ]
+      },
+      "expected_canonical": "{\"action\":\"LOGIN_CONFIRM\",\"externalUsername\":\"a@b.com\",\"jti\":\"jti_7\",\"requestId\":\"req_7\",\"riskFactors\":[\"new_country_for_user\"],\"riskLevel\":\"medium\",\"riskScore\":0.3,\"status\":\"SUCCESS\",\"timestamp\":\"2026-11-24T12:00:00.000Z\"}",
+      "expected_signature": "60a1180dd6b91ea3c7cd4c81ab8531989722e1ced466998c29c36ff728a84359",
+      "delivered_body": "{\"status\":\"SUCCESS\",\"action\":\"LOGIN_CONFIRM\",\"requestId\":\"req_7\",\"externalUsername\":\"a@b.com\",\"timestamp\":\"2026-11-24T12:00:00.000Z\",\"jti\":\"jti_7\",\"riskScore\":0.3,\"riskLevel\":\"medium\",\"riskFactors\":[\"new_country_for_user\"],\"signature\":\"60a1180dd6b91ea3c7cd4c81ab8531989722e1ced466998c29c36ff728a84359\"}"
+    },
+    {
+      "description": "a request from before risk levels: riskLevel null",
+      "payload": {
+        "status": "REJECTED",
+        "action": "LOGIN_REJECT",
+        "requestId": "req_8",
+        "riskScore": 0,
+        "riskFactors": [],
+        "riskLevel": null,
+        "reason": "user_rejected"
+      },
+      "expected_canonical": "{\"action\":\"LOGIN_REJECT\",\"reason\":\"user_rejected\",\"requestId\":\"req_8\",\"riskFactors\":[],\"riskLevel\":null,\"riskScore\":0,\"status\":\"REJECTED\"}",
+      "expected_signature": "af1ce62ed41d46b5eedd5d75ec604f4c409addd91fd76c73297ab1e652927a9c",
+      "delivered_body": "{\"status\":\"REJECTED\",\"action\":\"LOGIN_REJECT\",\"requestId\":\"req_8\",\"riskScore\":0,\"riskFactors\":[],\"riskLevel\":null,\"reason\":\"user_rejected\",\"signature\":\"af1ce62ed41d46b5eedd5d75ec604f4c409addd91fd76c73297ab1e652927a9c\"}"
     }
   ]
 }

@@ -56,6 +56,28 @@ with it blocked, only gets the visitor a step-up.
 - `Suspect`: the suspect score, in shadow: `Score` 0-100, `Band` (`low`, `medium`, `high`, `critical`),
   `WouldDo` (`allow`, `number_match`, `passkey`, `block`) and every reason with its points and who proves it
   (`server`, `site`, `page`, `brand`). It decides nothing yet.
+- `Network`: the address as the risk engine saw it (never coordinates) and the kind of network. `kind` is
+  `residential`, `mobile_carrier`, `education`, `business`, `public_wifi`, `hosting`, `proxy`, `vpn`, `tor`, `relay`
+  or `unknown` (`DeviceRiskClient.NetworkKinds`). It is an open list: new kinds may come in minor versions, so read
+  one you do not know as `unknown`. `kindSource` says where the kind came from, and `vpn` is a VPN company's own
+  address (`network_vpn` in the suspect score, 10 points). `shared` means many browsers used this address on your
+  pages in the last 24 hours; `sharedVisitors24h` and `sharedAccounts24h` are "at least" counts (1, 2, 5, 10, 100 or
+  1000). `lookAlikeMatching` false means the browser was recognised only by its own key, cookie or stored id, never
+  because it looks like another computer (identical computers in a lab or an office, or a school, company or public
+  Wi-Fi network on Touchque's list). The shared fields add no points. `proxy` means the address was on a proxy list
+  in the last 30 days: often a home or school line resold to a proxy network, so it counts little. These fields are
+  absent on older servers, and `kind` is null on identifications made before it existed.
+- `Bot`: one answer to "a bot?" (`result`, `reasons`, `type`, `tools`, `agent`, `input`). `tools` names the
+  automation tools (`selenium`, `playwright`, `puppeteer`, `phantomjs`, `nightmare`, `headless_chrome`) and the AI
+  agents (`claude_agent`: the Claude app's browser or Claude in Chrome; `comet_agent`: Perplexity Comet;
+  `genspark_agent`, `browser_use`, `stagehand`, `skyvern`) whose marks were on the page, each also a `tool_<name>`
+  reason. The reasons `cdp_input`, `input_no_focus`, `insert_text_bulk` and `scripted_click` are input only software
+  sends; other reasons include `cdp` (the DevTools protocol attached), `headless_window` (headless Chrome's default
+  window) and `emulator` (an Android emulator). Older servers send no AI agents and none of those four input reasons.
+  New values may come in minor versions.
+
+Touchque uses the IP2Proxy LITE database for [proxy and VPN detection](https://www.ip2location.com).
+This site or product includes IP2Proxy LITE data available from https://lite.ip2location.com.
 
 ## Read and search identifications
 
@@ -75,6 +97,11 @@ do
 `From`/`To` take YYYY-MM-DD or ISO times (7 days by default, at most 90). `Ip` is an address or a CIDR range
 and is never returned. A search that would read too much is a 422 `search_too_broad`.
 
+`NetworkKind` and `Shared` filter by the kind of network and the shared count (sent as `networkKind` and
+`shared=true|false`). `NetworkKind` matches only identifications classified since the field exists. `Shared = false`
+matches only identifications that were counted and not shared: one that was not counted matches neither value. An
+older server ignores both and does not narrow the search.
+
 ## Report what a visitor did
 
 ```csharp
@@ -93,6 +120,50 @@ network). For 24 hours the visitor's next checks carry the abuse codes and the s
 **Never send a card number**: a card is its BIN (6 to 8 digits) and last 4 digits only. Anything that looks like
 a card number is refused with `TouchqueConfigException` before a request is made. `Phone` (for `otp_sent`) and
 `Path` (for `not_found` / `forbidden`; only its class is counted) are optional.
+
+## Bot check
+
+Many bots never run JavaScript, so the page tag never sees them: an AI assistant fetching a page (ChatGPT-User),
+crawlers (GPTBot, Meta's, Grok's), curl and scripts. Send one visitor request's address and headers from your
+server, and Touchque answers which bot it is and whether that is proven. Touchque decides on its own servers with
+its own data (the operators' published address lists and signing keys, its own reverse DNS), never logs or stores
+the header values, and keeps nothing beyond short-lived counters.
+
+```csharp
+using Microsoft.AspNetCore.Http.Extensions;
+
+app.MapPost("/sign-up", async (HttpContext ctx) =>
+{
+    var check = await dr.BotCheckAsync(new BotCheckRequest
+    {
+        Ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "",   // behind a load balancer, call UseForwardedHeaders() first
+        Headers = ctx.Request.Headers.Select(h => KeyValuePair.Create(h.Key, h.Value.ToString())),
+        // HeaderOrderKnown stays false: ASP.NET Core does not keep the order the headers came in.
+        Method = ctx.Request.Method,
+        Url = ctx.Request.GetEncodedUrl(),                       // the query string is removed before sending
+        // HttpVersion and Tls only from what your edge saw: Request.Protocol is the connection to this server.
+    });
+    if (check.Bot.Identity == "unverified") { /* a spoofed name, e.g. a fake Googlebot: Suggestion is "block" */ }
+    // ...
+});
+```
+
+`check.Bot`: `Result` (`detected`, `suspected`, `not_detected`), `Category` (`ai_agent`, `ai_assistant`,
+`ai_crawler`, `ai_search`, `search_crawler`, `http_client`, `headless_browser`…), `Provider` and `Name` (`OpenAI`,
+`ChatGPT-User`), `Identity` (`verified`; `unverified`, a spoofed name; `claimed`, a name that cannot be checked, or
+not right now),
+`VerifiedBy`, `Confidence`, `Rule` and `Reasons`. `check.Network` is the address's ASN and whether it is a hosting
+network. `check.Suggestion` (`allow`, `block`, `challenge`) is advice in shadow: Touchque never enforces it.
+
+`Authorization`, `Cookie`, `Proxy-Authorization`, `X-Api-Key` and `Set-Cookie` are sent with empty values. What the
+visitor sent never makes the check throw: the first 100 headers go, a name is cut to 128 characters and a value to
+4096, the request is kept under 32 KB, and it tells Touchque it was cut (`truncated`); a header HTTP does not allow,
+a method other than 1 to 16 letters or a URL Touchque could not read is left out. Only no `Ip` (or one that is not an
+address), null `Headers` or a header without a name is a `TouchqueConfigException`, before any request; empty
+`Headers` (a request that had none) go as they are. Set `HeaderOrderKnown = true` only when your headers are in the
+order the visitor sent them. Set `HttpVersion` and `Tls` only when your edge tells you what the visitor's were:
+behind a proxy, `Request.Protocol` is the proxy's. New categories and fields are kept as they come (`check.Raw`
+holds the whole answer).
 
 ## Webhooks
 
